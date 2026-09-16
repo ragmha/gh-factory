@@ -1,0 +1,83 @@
+name: CD - Deploy to Azure Container Apps
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write # required for OIDC federated login (no client secret stored)
+  contents: read
+
+env:
+  RESOURCE_GROUP: rg-gh-factory
+  LOCATION: eastus2
+  NAME_PREFIX: ghfactory
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    outputs:
+      web_fqdn: ${{ steps.deploy2.outputs.webFqdn }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Ensure resource group exists
+        run: |
+          az group create -n "$RESOURCE_GROUP" -l "$LOCATION" -o none
+
+      - name: Deploy infra (pass 1 - ensures ACR/environment exist)
+        id: deploy1
+        run: |
+          az deployment group create \
+            --resource-group "$RESOURCE_GROUP" \
+            --template-file infra/main.bicep \
+            --parameters namePrefix="$NAME_PREFIX" location="$LOCATION" \
+              deploymentPrincipalId="${{ secrets.AZURE_CLIENT_OBJECT_ID }}" \
+            -o json > deploy1.json
+          echo "acrLoginServer=$(jq -r '.properties.outputs.acrLoginServer.value' deploy1.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push images to ACR
+        id: build
+        run: |
+          ACR="${{ steps.deploy1.outputs.acrLoginServer }}"
+          SHA_TAG="${GITHUB_SHA::12}"
+          az acr login --name "${ACR%%.*}"
+
+          docker build -t "$ACR/gh-factory-api:$SHA_TAG" -t "$ACR/gh-factory-api:latest" ./apps/api
+          docker push "$ACR/gh-factory-api:$SHA_TAG"
+          docker push "$ACR/gh-factory-api:latest"
+
+          API_FQDN=$(jq -r '.properties.outputs.apiFqdn.value' deploy1.json)
+          docker build \
+            --build-arg VITE_API_BASE_URL="https://${API_FQDN}/api" \
+            -t "$ACR/gh-factory-web:$SHA_TAG" -t "$ACR/gh-factory-web:latest" ./apps/web
+          docker push "$ACR/gh-factory-web:$SHA_TAG"
+          docker push "$ACR/gh-factory-web:latest"
+
+          echo "apiImage=$ACR/gh-factory-api:$SHA_TAG" >> "$GITHUB_OUTPUT"
+          echo "webImage=$ACR/gh-factory-web:$SHA_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy infra (pass 2 - roll out the real images)
+        id: deploy2
+        run: |
+          az deployment group create \
+            --resource-group "$RESOURCE_GROUP" \
+            --template-file infra/main.bicep \
+            --parameters namePrefix="$NAME_PREFIX" location="$LOCATION" \
+              deploymentPrincipalId="${{ secrets.AZURE_CLIENT_OBJECT_ID }}" \
+              apiImage="${{ steps.build.outputs.apiImage }}" \
+              webImage="${{ steps.build.outputs.webImage }}" \
+            -o json > deploy2.json
+          echo "webFqdn=$(jq -r '.properties.outputs.webFqdn.value' deploy2.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Print app URL
+        run: echo "Deployed shop is live at https://${{ steps.deploy2.outputs.webFqdn }}"
