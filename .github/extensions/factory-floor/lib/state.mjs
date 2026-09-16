@@ -34,6 +34,7 @@ const FALLBACK_CONFIG = {
     rules: [],
     gates: { required: ["Typecheck", "Test", "Lint"] },
     loop: { targetSteps: 10, warnAfterSteps: 20 },
+    intake: { labels: [], signalLabels: [] },
 };
 
 // ---------------------------------------------------------------------------
@@ -223,6 +224,7 @@ function emptyState() {
         nextId: 1,
         lastSync: null,
         policyOpen: false,
+        legendOpen: false,
     };
 }
 
@@ -253,10 +255,18 @@ export function persist() {
     }
 }
 
+/** Clear the board back to an empty floor, keeping the repo and policy intact. */
+export function resetBoard() {
+    const board = loadState();
+    board.cards = [];
+    board.nextId = 1;
+    board.lastSync = null;
+    return board;
+}
+
 export function findCard(id) {
     return loadState().cards.find((card) => String(card.id) === String(id)) ?? null;
 }
-
 export function findCardByIssue(issue) {
     return loadState().cards.find((card) => card.issue === Number(issue)) ?? null;
 }
@@ -343,6 +353,7 @@ export function snapshot() {
         mode: config.mode === "dark" ? "dark" : "lit",
         lastSync: board.lastSync,
         policyOpen: board.policyOpen ?? false,
+        legendOpen: board.legendOpen ?? false,
         stats: {
             total: cards.length,
             atGate: cards.filter((c) => c.lane === "review").length,

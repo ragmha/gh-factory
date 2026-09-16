@@ -44,19 +44,48 @@ export async function isAvailable() {
     }
 }
 
-/** Open issues labelled for the factory queue. */
-export async function listIntake(repo, label = "factory:intake", limit = 30) {
-    const args = ["issue", "list", "--state", "open", "--limit", String(limit), "--json", "number,title,labels,url"];
-    if (repo) args.push("--repo", repo);
-    if (label) args.push("--label", label);
-    const issues = (await ghJson(args)) ?? [];
-    return issues.map((issue) => ({
-        number: issue.number,
-        title: issue.title,
-        url: issue.url,
-        labels: (issue.labels ?? []).map((l) => l.name),
-        kind: (issue.labels ?? []).some((l) => l.name === "kind:signal") ? "signal" : "intent",
-    }));
+/**
+ * Open issues that belong in the factory queue.
+ *
+ * Labels are OR-ed rather than AND-ed: `gh issue list` intersects repeated
+ * --label flags, which is the opposite of what an intake filter wants. One
+ * query per label, merged by issue number.
+ */
+export async function listIntake(repo, options = {}) {
+    const labels = (options.labels ?? []).filter(Boolean);
+    const signalLabels = new Set(options.signalLabels ?? []);
+    const limit = options.limit ?? 30;
+    const queries = labels.length > 0 ? labels : [null];
+
+    const byNumber = new Map();
+    const failures = [];
+
+    for (const label of queries) {
+        const args = ["issue", "list", "--state", "open", "--limit", String(limit), "--json", "number,title,labels,url"];
+        if (repo) args.push("--repo", repo);
+        if (label) args.push("--label", label);
+        try {
+            for (const issue of (await ghJson(args)) ?? []) byNumber.set(issue.number, issue);
+        } catch (error) {
+            failures.push(error.message);
+        }
+    }
+
+    // A single missing label is survivable; losing every query is not.
+    if (failures.length === queries.length) throw new Error(failures[0] ?? "gh issue list failed");
+
+    return [...byNumber.values()]
+        .map((issue) => {
+            const names = (issue.labels ?? []).map((l) => l.name);
+            return {
+                number: issue.number,
+                title: issue.title,
+                url: issue.url,
+                labels: names,
+                kind: names.some((name) => signalLabels.has(name)) ? "signal" : "intent",
+            };
+        })
+        .sort((a, b) => a.number - b.number);
 }
 
 /** Paths changed by a pull request. These drive the autonomy resolution. */

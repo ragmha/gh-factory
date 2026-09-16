@@ -28,6 +28,7 @@ import {
     effectiveAutonomy,
 } from "./lib/state.mjs";
 import { renderHtml } from "./lib/render.mjs";
+import { createDemo } from "./lib/demo.mjs";
 import * as gh from "./lib/github.mjs";
 
 const servers = new Map(); // instanceId -> { server, url }
@@ -38,7 +39,7 @@ const clients = new Map(); // instanceId -> Set<ServerResponse>
 // ---------------------------------------------------------------------------
 
 function broadcast() {
-    const payload = `data: ${JSON.stringify(snapshot())}\n\n`;
+    const payload = `data: ${JSON.stringify(fullSnapshot())}\n\n`;
     for (const set of clients.values()) {
         for (const res of set) {
             try {
@@ -54,7 +55,12 @@ function broadcast() {
 function commit() {
     persist();
     broadcast();
-    return snapshot();
+    return fullSnapshot();
+}
+
+/** The board plus where the guided demo is up to, which is session state rather than repo state. */
+function fullSnapshot() {
+    return { ...snapshot(), demo: demo.status() };
 }
 
 function readBody(req) {
@@ -186,7 +192,10 @@ function switchMode(mode) {
     let added = 0;
 
     try {
-        const issues = await gh.listIntake(repo);
+        const issues = await gh.listIntake(repo, {
+            labels: config.intake?.labels ?? [],
+            signalLabels: config.intake?.signalLabels ?? [],
+        });
         for (const issue of issues) {
             const existing = findCardByIssue(issue.number);
             if (existing) {
@@ -238,6 +247,8 @@ function switchMode(mode) {
 // HTTP surface
 // ---------------------------------------------------------------------------
 
+const demo = createDemo({ commit, mechanics: { advance, resolveReview, switchMode } });
+
 const ROUTES = {
     "/move": (body) => {
         const card = findCard(body.cardId);
@@ -269,6 +280,30 @@ const ROUTES = {
         commit();
         return {};
     },
+    "/legend-open": (body) => {
+        loadState().legendOpen = !!body.open;
+        commit();
+        return {};
+    },
+    "/demo": (body) => {
+        if (body.action === "play") {
+            demo.play();
+            return { message: "Demo running — the board drives itself from here." };
+        }
+        if (body.action === "pause") {
+            demo.pause();
+            return { message: "Demo paused" };
+        }
+        if (body.action === "reset") {
+            demo.reset();
+            return { message: "Board cleared and the lights are back on." };
+        }
+        if (body.action === "speed") {
+            const status = demo.setSpeed(body.value);
+            return { message: `Demo speed ${status.speed}×` };
+        }
+        return { message: "Unknown demo action" };
+    },
     "/mode": (body) => {
         const result = switchMode(body.mode);
         return { message: result.note };
@@ -284,7 +319,7 @@ async function handle(req, res, instanceId) {
         });
         if (!clients.has(instanceId)) clients.set(instanceId, new Set());
         clients.get(instanceId).add(res);
-        res.write(`data: ${JSON.stringify(snapshot())}\n\n`);
+        res.write(`data: ${JSON.stringify(fullSnapshot())}\n\n`);
         req.on("close", () => clients.get(instanceId)?.delete(res));
         return;
     }
@@ -299,12 +334,12 @@ async function handle(req, res, instanceId) {
             result = ROUTES[req.url](body);
         }
         res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ...result, state: snapshot() }));
+        res.end(JSON.stringify({ ...result, state: fullSnapshot() }));
         return;
     }
 
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-    res.end(renderHtml(snapshot()));
+    res.end(renderHtml(fullSnapshot()));
 }
 
 async function startServer(instanceId) {
@@ -567,6 +602,35 @@ const actions = [
         handler: async (ctx) => ({ ...switchMode(ctx.input.mode), stats: snapshot().stats }),
     },
     {
+        name: "run_demo",
+        description:
+            "Drive the built-in guided demo on the canvas: a scripted run of the whole factory, from issues arriving to a human catching something CI could not, ending with a lights-out comparison. Use this when someone wants to see how the board behaves rather than set it up by hand. It clears the board first, so do not run it over real work.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                action: {
+                    type: "string",
+                    enum: ["play", "pause", "reset", "speed"],
+                    description: "play starts or resumes, pause stops on the current step, reset clears the board and restores the lights, speed changes the pace",
+                },
+                speed: {
+                    type: "number",
+                    enum: [0.5, 1, 2],
+                    description: "Pace multiplier when action is speed. 0.5 is half speed, 2 is double.",
+                },
+            },
+            required: ["action"],
+        },
+        handler: async (ctx) => {
+            const { action, speed } = ctx.input;
+            if (action === "speed") return demo.setSpeed(speed);
+            if (action !== "play" && action !== "pause" && action !== "reset") {
+                return { message: "Unknown demo action" };
+            }
+            return demo[action]();
+        },
+    },
+    {
         name: "sync_from_github",
         description:
             "Refresh the floor from GitHub: pull open issues labelled factory:intake into Intake, and refresh changed paths and check results for every card that has a pull request.",
@@ -587,7 +651,7 @@ const session = await joinSession({
             id: "factory-floor",
             displayName: "Factory Floor",
             description:
-                "The control surface for a software factory. Work moves Intake → Queue → Harness → Checks → Review Gate → Shipped. An autonomy policy decides which changes ship dark (unattended) and which stay lit (a human reads them first); the review gate is the one box that does not scale. Humans drag cards, flip policy switches, cut the lights and approve at the gate; the agent calls get_floor, enqueue_work, pull_next, advance_stage, record_check, set_autonomy, link_pr, request_review, resolve_review, set_factory_mode and sync_from_github.",
+                "The control surface for a software factory. Work moves Intake → Queue → Harness → Checks → Review Gate → Shipped. An autonomy policy decides which changes ship dark (unattended) and which stay lit (a human reads them first); the review gate is the one box that does not scale. Humans drag cards, flip policy switches, cut the lights, play the guided demo and approve at the gate; the agent calls get_floor, enqueue_work, pull_next, advance_stage, record_check, set_autonomy, link_pr, request_review, resolve_review, set_factory_mode, run_demo and sync_from_github.",
             actions,
             open: async (ctx) => {
                 let entry = servers.get(ctx.instanceId);
@@ -603,6 +667,7 @@ const session = await joinSession({
                 if (!entry) return;
                 servers.delete(ctx.instanceId);
                 clients.delete(ctx.instanceId);
+                if (servers.size === 0) demo.stop();
                 persist();
                 await new Promise((resolve) => entry.server.close(() => resolve()));
             },

@@ -66,7 +66,8 @@ export function renderHtml(snapshot) {
     background: rgba(139,148,158,0.12);
     padding: 2px 8px; border-radius: 10px;
   }
-  .actions { display: flex; gap: 6px; align-items: center; }
+  .actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .actions .sep { width: 1px; height: 18px; background: var(--border); margin: 0 2px; }
   button {
     font: inherit; font-size: 11px; cursor: pointer;
     background: rgba(139,148,158,0.12);
@@ -97,6 +98,25 @@ export function renderHtml(snapshot) {
     color: #ff9492; font-size: 11.5px;
   }
   body.dark-factory .lights-banner { display: block; }
+
+  /* ---------- demo runner ---------- */
+  .demo-strip {
+    display: flex; align-items: center; gap: 10px; margin-top: 10px;
+    padding: 6px 11px; border-radius: 7px;
+    background: rgba(88,166,255,0.08); border: 1px solid rgba(88,166,255,0.32);
+  }
+  .demo-strip[hidden] { display: none; }
+  .demo-strip .step {
+    font-family: var(--font-mono, ui-monospace, Consolas, monospace);
+    font-size: 10.5px; color: #79c0ff; white-space: nowrap;
+  }
+  .demo-strip .bar { width: 90px; height: 4px; border-radius: 3px; background: rgba(139,148,158,0.25); overflow: hidden; flex-shrink: 0; }
+  .demo-strip .bar .fill { height: 100%; background: #58a6ff; transition: width .35s ease; }
+  .demo-strip .caption { font-size: 11.5px; color: var(--text); line-height: 1.4; }
+  button.playing { background: rgba(88,166,255,0.2); border-color: rgba(88,166,255,0.55); color: #79c0ff; }
+  .speed { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; }
+  .speed button { border: 0; border-radius: 0; padding: 4px 9px; background: transparent; font-size: 10.5px; }
+  .speed button.sel { background: rgba(88,166,255,0.22); color: #79c0ff; }
 
   /* ---------- pipeline strip ---------- */
   .pipeline { display: flex; align-items: center; gap: 4px; margin-top: 12px; flex-wrap: wrap; }
@@ -138,6 +158,39 @@ export function renderHtml(snapshot) {
   .switch button { border: 0; border-radius: 0; padding: 3px 11px; background: transparent; font-size: 11px; }
   .switch button.sel[data-v="lit"] { background: rgba(210,153,34,0.25); color: #e3b341; }
   .switch button.sel[data-v="dark"] { background: rgba(110,118,129,0.3); color: #adbac7; }
+
+  /* ---------- lit vs dark legend ---------- */
+  .legend {
+    flex-shrink: 0;
+    border-bottom: 1px solid var(--border);
+    background: rgba(22,27,34,0.6);
+    max-height: 46vh; overflow-y: auto;
+    padding: 14px 18px 16px;
+  }
+  .legend[hidden] { display: none; }
+  .legend h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: 10px; }
+  .legend .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+  .legend .def { padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+  .legend .def.lit { border-left: 3px solid var(--accent-lit); }
+  .legend .def.dark { border-left: 3px solid var(--accent-dark); }
+  .legend .def h3 { font-size: 12px; margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
+  .legend .def.lit h3 { color: #e3b341; }
+  .legend .def.dark h3 { color: #adbac7; }
+  .legend .def p { font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+  .legend .def .earn { margin-top: 7px; font-size: 11px; color: var(--muted); }
+  .legend .def .earn li { margin-left: 15px; line-height: 1.55; }
+  .legend .def .earn strong { color: var(--text); font-weight: 600; }
+  .legend .rules-of-thumb { display: flex; flex-direction: column; gap: 7px; }
+  .legend .tip {
+    font-size: 11.5px; color: var(--muted); line-height: 1.5;
+    padding: 7px 11px; border-radius: 7px;
+    background: rgba(139,148,158,0.07); border: 1px solid var(--border);
+  }
+  .legend .tip b { color: var(--text); font-weight: 600; }
+  .legend code {
+    font-family: var(--font-mono, ui-monospace, Consolas, monospace);
+    font-size: 10.5px; background: rgba(139,148,158,0.14); padding: 1px 5px; border-radius: 4px; color: #79c0ff;
+  }
 
   /* ---------- board ---------- */
   .board { flex: 1; display: flex; gap: 10px; padding: 14px 18px; overflow-x: auto; min-height: 0; }
@@ -220,24 +273,91 @@ export function renderHtml(snapshot) {
   <div class="title-row">
     <h1><span class="spark">◆</span> Factory Floor <span class="repo" id="repo"></span></h1>
     <div class="actions">
+      <button id="demo-btn" class="primary">▶ Play demo</button>
+      <span class="speed" id="speed"></span>
+      <button id="demo-reset">Reset</button>
+      <span class="sep"></span>
+      <button id="legend-btn">Lit vs dark</button>
       <button id="mode-btn">Lights out</button>
       <button id="policy-btn">Policy</button>
       <button id="sync-btn">Sync from GitHub</button>
     </div>
   </div>
   <div class="pipeline" id="pipeline"></div>
+  <div class="demo-strip" id="demo-strip" hidden>
+    <span class="step" id="demo-step"></span>
+    <div class="bar"><div class="fill" id="demo-fill"></div></div>
+    <span class="caption" id="demo-caption"></span>
+  </div>
   <div class="lights-banner">
     Lights out. Every rule is dark and the review gate is bypassed — nothing waits on a person.
     The tests are still green. That is exactly what makes this hard to notice.
   </div>
 </header>
 
+<section class="legend" id="legend" hidden>
+  <h2>What lit and dark mean</h2>
+  <div class="pair">
+    <div class="def lit">
+      <h3>◉ Lit — a person reads it before it ships</h3>
+      <p>
+        Not because the agent is careless, but because the automated check is a weak oracle next to
+        the cost of being wrong. <code>az bicep build</code> proves a template parses; it says nothing
+        about what happens to running infrastructure. Green tells you the code ran, not that it is right.
+      </p>
+      <div class="earn">
+        <strong>Typical lit work:</strong> money and pricing, public contracts, infrastructure,
+        the pipeline itself, anything where failure is silent or slow to surface.
+      </div>
+    </div>
+    <div class="def dark">
+      <h3>○ Dark — it ships unattended on green</h3>
+      <p>
+        No human in the loop. A loop does not start dark; it has to earn it. Every touched path must
+        have an oracle that is genuinely good enough to be the last word.
+      </p>
+      <div class="earn">
+        <strong>Earning the dark takes all four:</strong>
+        <ul>
+          <li><strong>Cheap</strong> — runs in seconds, not overnight.</li>
+          <li><strong>Frequent</strong> — on every change, not on a schedule.</li>
+          <li><strong>Hard to fake</strong> — passing it means the thing actually works.</li>
+          <li><strong>Small blast radius</strong> — if it is wrong anyway, the damage is bounded and reversible.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <div class="rules-of-thumb">
+    <div class="tip">
+      <b>Lit wins.</b> A change touching one lit path is lit, even if everything else in the diff is dark.
+      Back pressure is about the riskiest thing in the change, not the average of it.
+    </div>
+    <div class="tip">
+      <b>Unknown territory stays lit.</b> A path matching no rule falls back to the default, which is lit.
+      New parts of the codebase have not earned anything yet.
+    </div>
+    <div class="tip">
+      <b>Blast radius is a separate axis.</b> It is how much breaks if this is wrong, not who checks it.
+      High blast with a cheap oracle is still lit — that combination is exactly where autonomy hurts most.
+    </div>
+    <div class="tip">
+      <b>Comprehension debt</b> in the footer is the share of shipped work no human read. Dark work buys
+      speed by taking on that debt deliberately. It is a purchase, not a free win — which is what
+      <b>Lights out</b> is there to show.
+    </div>
+    <div class="tip">
+      These switches are not a display setting. They are read from and written to
+      <code>factory.config.json</code> in the repo, so changing one here shows up in the next diff.
+    </div>
+  </div>
+</section>
+
 <section class="policy" id="policy" hidden>
   <h2>Autonomy policy</h2>
   <p class="lede">
     Back pressure, expressed as data. A loop earns the dark only when the check is cheap, runs
     often, and is hard to fake. Flipping a switch here rewrites <code>factory.config.json</code>
-    and re-resolves every card on the board.
+    and re-resolves every card on the board. Not sure which is which? Open <b>Lit vs dark</b>.
   </p>
   <div id="rules"></div>
 </section>
@@ -330,15 +450,48 @@ function renderPolicy() {
   });
 }
 
+function renderDemo() {
+  const d = state.demo || { playing: false, step: 0, total: 0, caption: null, finished: false };
+  const btn = $("demo-btn");
+  const started = d.step > 0 && !d.finished;
+  btn.textContent = d.playing ? "❚❚ Pause" : (started ? "▶ Resume" : "▶ Play demo");
+  btn.classList.toggle("playing", !!d.playing);
+  btn.classList.toggle("primary", !d.playing);
+
+  const strip = $("demo-strip");
+  strip.hidden = d.step === 0;
+  if (d.step === 0) return;
+  $("demo-step").textContent = d.step + " / " + d.total;
+  $("demo-fill").style.width = (d.total ? Math.round((d.step / d.total) * 100) : 0) + "%";
+  $("demo-caption").textContent = d.caption || "";
+}
+
+function renderSpeed() {
+  const d = state.demo || {};
+  const speeds = d.speeds || [0.5, 1, 2];
+  const current = d.speed || 1;
+  $("speed").innerHTML = speeds.map(function (s) {
+    return '<button data-speed="' + s + '" title="' + (s < 1 ? "Slower — more time to read each step" : s > 1 ? "Faster" : "Normal pace") + '"' +
+      (s === current ? ' class="sel"' : "") + ">" + s + "\u00d7</button>";
+  }).join("");
+  $("speed").querySelectorAll("button[data-speed]").forEach(function (btn) {
+    btn.onclick = () => post("/demo", { action: "speed", value: Number(btn.dataset.speed) });
+  });
+}
+
 function renderCard(card) {
   const a = card.resolved;
   const issueLink = card.issue
     ? '<span class="issue">' + (card.url ? '<a href="' + esc(card.url) + '" target="_blank">#' + card.issue + "</a>" : "#" + card.issue) + "</span>"
     : "";
 
+  const litTip = a.autonomy === "lit"
+    ? "Lit — a person reads this before it ships. The automated checks are not a strong enough oracle for what this change touches."
+    : "Dark — ships unattended once the checks are green. This path has a cheap, frequent, hard-to-fake oracle and a small blast radius.";
+
   const pills = [
-    '<span class="pill ' + a.autonomy + '">' + (a.autonomy === "lit" ? "◉ lit" : "○ dark") + "</span>",
-    '<span class="pill blast-' + esc(a.blastRadius) + '">' + esc(a.blastRadius) + " blast</span>",
+    '<span class="pill ' + a.autonomy + '" title="' + esc(litTip) + '">' + (a.autonomy === "lit" ? "◉ lit" : "○ dark") + "</span>",
+    '<span class="pill blast-' + esc(a.blastRadius) + '" title="Blast radius: how much breaks if this change is wrong. Separate from who checks it.">' + esc(a.blastRadius) + " blast</span>",
   ];
   if (a.overridden) pills.push('<span class="pill override">override</span>');
   if (card.pr) {
@@ -444,12 +597,20 @@ function render() {
   modeBtn.classList.toggle("lights-out", state.mode === "dark");
   $("policy").hidden = !state.policyOpen;
   $("policy-btn").classList.toggle("on", !!state.policyOpen);
+  $("legend").hidden = !state.legendOpen;
+  $("legend-btn").classList.toggle("on", !!state.legendOpen);
+  renderDemo();
+  renderSpeed();
   renderPipeline();
   renderPolicy();
   renderBoard();
   renderFooter();
 }
 
+$("demo-btn").onclick = () =>
+  post("/demo", { action: (state.demo && state.demo.playing) ? "pause" : "play" });
+$("demo-reset").onclick = () => post("/demo", { action: "reset" });
+$("legend-btn").onclick = () => post("/legend-open", { open: !state.legendOpen });
 $("mode-btn").onclick = () => post("/mode", { mode: state.mode === "dark" ? "lit" : "dark" });
 $("policy-btn").onclick = () => post("/policy-open", { open: !state.policyOpen });
 $("sync-btn").onclick = async () => {

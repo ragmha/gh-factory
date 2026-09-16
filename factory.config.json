@@ -118,6 +118,18 @@
     "warnAfterSteps": 20,
     "note": "An agent holds up for three to ten steps and starts losing the thread past twenty. Short loops are cheap to verify; sprawling loops hide mistakes in the corners."
   },
+  "intake": {
+    "labels": [
+      "human-intent",
+      "ready-work",
+      "agent-execution",
+      "feedback-learning"
+    ],
+    "signalLabels": [
+      "feedback-learning"
+    ],
+    "note": "Which open issues belong in the factory queue. Labels are OR-ed. A signal came back from production (feedback-learning); an intent is a decision somebody made. durable-context is deliberately not a signal marker — it describes what an issue carries, not where it came from."
+  },
   "reviewGate": {
     "owner": "human",
     "note": "Every box in this factory is close to free except this one. It is the only box that does not scale, which is exactly why a person owns it."
