@@ -47,9 +47,15 @@ app.get('/api/cart/:cartId', (req, res) => {
 app.post('/api/cart/:cartId/items', (req, res) => {
   const { productId, quantity } = req.body || {};
   if (!productId) return res.status(400).json({ error: 'productId is required' });
-  const cart = addToCart(req.params.cartId, productId, quantity ?? 1);
-  if (!cart) return res.status(404).json({ error: 'Product not found' });
-  res.json({ items: cart, total: cartTotal(req.params.cartId) });
+
+  const result = addToCart(req.params.cartId, productId, quantity);
+  if (!result.ok) {
+    if (result.reason === 'product_not_found') {
+      return res.status(404).json({ error: 'Product not found' });
+    }
+    return res.status(400).json({ error: 'quantity must be a positive integer' });
+  }
+  res.json({ items: result.items, total: cartTotal(req.params.cartId) });
 });
 
 app.delete('/api/cart/:cartId/items/:productId', (req, res) => {
