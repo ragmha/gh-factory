@@ -218,6 +218,7 @@ export function renderHtml(snapshot) {
   }
   .card:hover { border-color: #484f58; }
   .card.dragging { opacity: .45; cursor: grabbing; }
+  .card.selected { border-color: #58a6ff; box-shadow: 0 0 0 1px rgba(88,166,255,0.35); }
   .card.lit { border-left: 3px solid var(--accent-lit); }
   .card.dark { border-left: 3px solid var(--accent-dark); }
   .card .head { display: flex; align-items: flex-start; gap: 6px; justify-content: space-between; }
@@ -265,6 +266,54 @@ export function renderHtml(snapshot) {
     font-size: 11.5px; opacity: 0; pointer-events: none; transition: opacity .2s ease, transform .2s ease;
   }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* ---------- card detail sheet ---------- */
+  .sheet-backdrop {
+    position: fixed; inset: 0; background: rgba(1,4,9,0.55); z-index: 40;
+    opacity: 0; pointer-events: none; transition: opacity .15s ease;
+  }
+  .sheet-backdrop.show { opacity: 1; pointer-events: auto; }
+  .sheet {
+    position: fixed; top: 0; right: 0; bottom: 0; z-index: 41;
+    width: min(390px, 94%);
+    display: flex; flex-direction: column;
+    background: var(--surface); border-left: 1px solid var(--border);
+    box-shadow: -18px 0 40px rgba(1,4,9,0.5);
+    transform: translateX(101%); transition: transform .18s ease;
+  }
+  .sheet.show { transform: translateX(0); }
+  .sheet-head {
+    flex-shrink: 0; padding: 13px 15px 11px; border-bottom: 1px solid var(--border);
+    display: flex; gap: 10px; align-items: flex-start; justify-content: space-between;
+  }
+  .sheet-head h2 { font-size: 13px; font-weight: 600; line-height: 1.4; }
+  .sheet-head .sub { font-size: 10.5px; color: var(--muted); margin-top: 3px; }
+  .sheet-head .sub a { color: #58a6ff; text-decoration: none; }
+  .sheet-head .sub a:hover { text-decoration: underline; }
+  .sheet-close { flex-shrink: 0; font-size: 14px; line-height: 1; padding: 3px 9px; }
+  .sheet-body { flex: 1; overflow-y: auto; padding: 13px 15px 20px; display: flex; flex-direction: column; gap: 15px; }
+  .sheet section h3 {
+    font-size: 10px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--muted); margin-bottom: 7px;
+  }
+  .sheet .kv { font-size: 11.5px; color: var(--muted); line-height: 1.55; }
+  .sheet .kv + .kv { margin-top: 4px; }
+  .sheet .kv b { color: var(--text); font-weight: 600; }
+  .sheet .pathlist {
+    font-family: var(--font-mono, ui-monospace, Consolas, monospace);
+    font-size: 11px; color: #79c0ff; display: flex; flex-direction: column; gap: 3px; word-break: break-all;
+  }
+  .sheet .timeline { border-left: 1px solid var(--border); margin-left: 4px; padding-left: 14px; }
+  .sheet .ev { position: relative; padding: 5px 0; font-size: 11.5px; line-height: 1.45; color: var(--text); }
+  .sheet .ev::before {
+    content: ""; position: absolute; left: -18px; top: 11px;
+    width: 7px; height: 7px; border-radius: 50%; background: var(--border);
+  }
+  .sheet .ev.latest::before { background: #58a6ff; }
+  .sheet .ev .t {
+    font-family: var(--font-mono, ui-monospace, Consolas, monospace);
+    font-size: 10px; color: var(--muted); margin-right: 7px;
+  }
 </style>
 </head>
 <body>
@@ -374,12 +423,17 @@ export function renderHtml(snapshot) {
   <span class="sync" id="sync-text"></span>
 </footer>
 
+<div class="sheet-backdrop" id="sheet-backdrop"></div>
+<aside class="sheet" id="sheet"></aside>
+
 <div id="toast"></div>
 
 <script>
 const ACCENT = ${accents};
 let state = ${initial};
 let dragging = null;
+let justDragged = false;
+let selected = null;
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
@@ -399,6 +453,124 @@ async function post(path, body) {
   } catch (err) {
     toast("Request failed");
   }
+}
+
+function renderSheet() {
+  const sheet = $("sheet");
+  const backdrop = $("sheet-backdrop");
+  const card = selected === null ? null : state.cards.find((c) => String(c.id) === String(selected));
+
+  if (!card) {
+    selected = null;
+    sheet.classList.remove("show");
+    backdrop.classList.remove("show");
+    return;
+  }
+
+  const a = card.resolved;
+  const laneLabel = (state.laneMeta[card.lane] || {}).label || card.lane;
+  const link = card.url
+    ? '<a href="' + esc(card.url) + '" target="_blank">' + (card.issue ? "#" + card.issue : "open") + "</a>"
+    : (card.issue ? "#" + card.issue : "no linked issue");
+  const prLink = card.pr
+    ? (card.prUrl ? ' · <a href="' + esc(card.prUrl) + '" target="_blank">PR #' + card.pr + "</a>" : " · PR #" + card.pr)
+    : "";
+
+  const rules = (a.ruleIds || []).length ? (a.ruleIds).map(esc).join(", ") : "none matched — the default applied";
+
+  const gateRows = (card.gate.results || []).length
+    ? (card.gate.results).map((r) =>
+        '<div class="kv"><span class="gate-chip ' + esc(r.status) + '" style="display:inline-block;min-width:52px;margin-right:7px">' +
+        esc(r.status) + "</span>" + esc(r.name) + "</div>").join("")
+    : '<div class="kv">No gates have reported yet.</div>';
+
+  const pathRows = (card.paths || []).length
+    ? '<div class="pathlist">' + (card.paths).map((p) => "<span>" + esc(p) + "</span>").join("") + "</div>"
+    : '<div class="kv">No paths recorded yet, so the default autonomy applies.</div>';
+
+  const hist = card.history || [];
+  const timeline = hist.length
+    ? '<div class="timeline">' + hist.map((h, i) =>
+        '<div class="ev' + (i === hist.length - 1 ? " latest" : "") + '"><span class="t">' +
+        esc(new Date(h.at).toLocaleTimeString()) + "</span>" + esc(h.note) + "</div>").join("") + "</div>"
+    : '<div class="kv">Nothing recorded yet.</div>';
+
+  let verdictBlock = "";
+  if (card.verdict === "approved") {
+    verdictBlock = '<section><h3>Verdict</h3><div class="verdict approved">Approved' +
+      (card.reviewNote ? " — " + esc(card.reviewNote) : "") + "</div></section>";
+  } else if (card.verdict === "changes-requested") {
+    verdictBlock = '<section><h3>Verdict</h3><div class="verdict changes">Changes requested' +
+      (card.reviewNote ? " — " + esc(card.reviewNote) : "") + "</div></section>";
+  } else if (card.reviewNote) {
+    verdictBlock = '<section><h3>Waiting on a reviewer</h3><div class="kv">' + esc(card.reviewNote) + "</div></section>";
+  }
+
+  const actions = card.lane === "review"
+    ? '<section><h3>Review gate</h3><div class="card-actions">' +
+        '<button class="primary" data-approve="' + card.id + '">Approve</button>' +
+        '<button class="danger" data-changes="' + card.id + '">Request changes</button>' +
+      '</div><div class="kv" style="margin-top:6px">This is submitted to GitHub as a real pull request review.</div></section>'
+    : "";
+
+  const openBtn = (card.prUrl || card.url)
+    ? '<button data-open="' + esc(card.prUrl || card.url) + '">Open on GitHub</button>'
+    : "";
+
+  sheet.innerHTML =
+    '<div class="sheet-head">' +
+      "<div><h2>" + esc(card.title) + "</h2>" +
+        '<div class="sub">' + esc(laneLabel) + " · " + link + prLink + "</div></div>" +
+      '<button class="sheet-close" id="sheet-close" title="Close">✕</button>' +
+    "</div>" +
+    '<div class="sheet-body">' +
+      (openBtn ? "<section>" + openBtn + "</section>" : "") +
+      actions +
+      '<section><h3>Autonomy</h3>' +
+        '<div class="kv"><b>' + (a.autonomy === "lit" ? "◉ Lit" : "○ Dark") + "</b> · " + esc(a.blastRadius) + " blast radius" +
+          (a.overridden ? " · manually overridden" : "") + "</div>" +
+        '<div class="kv">' + esc(a.reason || "") + "</div>" +
+        '<div class="kv">Matched rules: <b>' + rules + "</b></div>" +
+      "</section>" +
+      "<section><h3>Gates</h3>" + gateRows +
+        '<div class="kv" style="margin-top:5px">' + esc(card.gate.summary || "") + "</div></section>" +
+      "<section><h3>Paths</h3>" + pathRows + "</section>" +
+      verdictBlock +
+      "<section><h3>History</h3>" + timeline + "</section>" +
+    "</div>";
+
+  sheet.classList.add("show");
+  backdrop.classList.add("show");
+  wireSheet();
+}
+
+function wireSheet() {
+  const close = $("sheet-close");
+  if (close) close.onclick = () => { selected = null; renderSheet(); };
+  $("sheet").querySelectorAll("[data-open]").forEach((btn) => {
+    btn.onclick = () => window.open(btn.dataset.open, "_blank");
+  });
+  wireReviewButtons($("sheet"));
+}
+
+/** Approve / request changes, wherever they are rendered. */
+function wireReviewButtons(root) {
+  root.querySelectorAll("[data-approve]").forEach((btn) => {
+    btn.onclick = async () => {
+      btn.disabled = true;
+      const data = await post("/review", { cardId: btn.dataset.approve, verdict: "approved" });
+      if (data && data.url) window.open(data.url, "_blank");
+    };
+  });
+  root.querySelectorAll("[data-changes]").forEach((btn) => {
+    btn.onclick = async () => {
+      const note = prompt("What needs to change? GitHub requires a reason for a request for changes.");
+      if (note === null || !note.trim()) return;
+      btn.disabled = true;
+      const data = await post("/review", { cardId: btn.dataset.changes, verdict: "changes-requested", note: note.trim() });
+      if (data && data.url) window.open(data.url, "_blank");
+    };
+  });
 }
 
 function toast(msg) {
@@ -520,7 +692,8 @@ function renderCard(card) {
     controls = '<div class="why">Shipped without a human reading it.</div>';
   }
 
-  return '<div class="card ' + a.autonomy + '" draggable="true" data-card="' + card.id + '">' +
+  return '<div class="card ' + a.autonomy + (String(selected) === String(card.id) ? " selected" : "") +
+    '" draggable="true" data-card="' + card.id + '" title="Click for full detail and history · drag to move">' +
     '<div class="head"><span class="title">' + esc(card.title) + "</span>" + issueLink + "</div>" +
     '<div class="meta">' + pills.join("") + "</div>" +
     (gates ? '<div class="gates">' + gates + "</div>" : "") +
@@ -553,8 +726,16 @@ function renderBoard() {
 
 function wireBoard() {
   document.querySelectorAll(".card").forEach((el) => {
-    el.addEventListener("dragstart", () => { dragging = el.dataset.card; el.classList.add("dragging"); });
+    el.addEventListener("dragstart", () => { dragging = el.dataset.card; justDragged = true; el.classList.add("dragging"); });
     el.addEventListener("dragend", () => { dragging = null; el.classList.remove("dragging"); });
+    el.addEventListener("click", (e) => {
+      // Links and the inline gate buttons keep their own behaviour.
+      if (e.target.closest("a") || e.target.closest("button")) return;
+      // A finished drag can be followed by a click; that is not a selection.
+      if (justDragged) { justDragged = false; return; }
+      selected = String(selected) === el.dataset.card ? null : el.dataset.card;
+      renderSheet();
+    });
   });
 
   document.querySelectorAll(".lane").forEach((el) => {
@@ -567,16 +748,7 @@ function wireBoard() {
     });
   });
 
-  document.querySelectorAll("[data-approve]").forEach((btn) => {
-    btn.onclick = () => post("/review", { cardId: btn.dataset.approve, verdict: "approved" });
-  });
-  document.querySelectorAll("[data-changes]").forEach((btn) => {
-    btn.onclick = () => {
-      const note = prompt("What needs to change?");
-      if (note === null) return;
-      post("/review", { cardId: btn.dataset.changes, verdict: "changes-requested", note });
-    };
-  });
+  wireReviewButtons($("board"));
 }
 
 function renderFooter() {
@@ -605,7 +777,13 @@ function render() {
   renderPolicy();
   renderBoard();
   renderFooter();
+  renderSheet();
 }
+
+$("sheet-backdrop").onclick = () => { selected = null; renderSheet(); };
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && selected !== null) { selected = null; renderSheet(); }
+});
 
 $("demo-btn").onclick = () =>
   post("/demo", { action: (state.demo && state.demo.playing) ? "pause" : "play" });

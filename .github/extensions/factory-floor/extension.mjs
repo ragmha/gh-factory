@@ -144,6 +144,70 @@ function resolveReview(card, verdict, note) {    card.verdict = verdict;
     return { verdict, lane: "harness", reason: "Sent back to the harness with feedback." };
 }
 
+const reviewBody = (verdict, note) =>
+    `**Factory Floor review gate — ${verdict === "approved" ? "approved" : "changes requested"}**\n\n` +
+    (note ? note : "_No note given._");
+
+/**
+ * Record a gate decision and push it to GitHub.
+ *
+ * A review gate whose verdict never leaves the board is decoration. The
+ * decision goes out as a real pull request review where there is a pull
+ * request to review, and degrades in visible steps rather than failing
+ * silently: formal review, then a comment on the PR, then a comment on the
+ * issue. Whatever happened is written into the card's history either way.
+ */
+async function applyReview(card, verdict, note) {
+    const local = resolveReview(card, verdict, note);
+    const board = loadState();
+    const repo = board.repo || loadConfig().repo || "";
+
+    // The gate is about a diff, so find one if the card has not been linked yet.
+    let pr = card.pr ?? null;
+    if (!pr && card.issue) {
+        try {
+            const found = await gh.pullRequestFor(repo, card.issue);
+            if (found) {
+                pr = found.number;
+                card.pr = found.number;
+                card.prUrl = found.url;
+            }
+        } catch {
+            // No PR discovered; the issue fallback below still applies.
+        }
+    }
+
+    const body = reviewBody(verdict, note);
+    let posted;
+
+    if (pr) {
+        try {
+            await gh.submitReview(repo, pr, verdict, note);
+            posted = `${verdict === "approved" ? "approved" : "changes requested"} on PR #${pr} in GitHub`;
+        } catch (error) {
+            try {
+                await gh.comment(repo, "pr", pr, body);
+                posted = `could not submit a formal review (${error.message}) — left a comment on PR #${pr}`;
+            } catch (fallbackError) {
+                posted = `could not reach PR #${pr}: ${fallbackError.message}`;
+            }
+        }
+    } else if (card.issue) {
+        try {
+            await gh.comment(repo, "issue", card.issue, body);
+            posted = `no pull request linked yet — recorded the decision on issue #${card.issue}`;
+        } catch (error) {
+            posted = `could not comment on issue #${card.issue}: ${error.message}`;
+        }
+    } else {
+        posted = "nothing linked on GitHub, so this decision stayed on the board";
+    }
+
+    record(card, posted);
+    commit();
+    return { ...local, posted, url: card.prUrl || card.url || null };
+}
+
 /**
  * Flip the whole factory between lit and lights-out.
  *
@@ -247,7 +311,12 @@ function switchMode(mode) {
 // HTTP surface
 // ---------------------------------------------------------------------------
 
-const demo = createDemo({ commit, mechanics: { advance, resolveReview, switchMode } });
+const demo = createDemo({
+    // The demo records verdicts locally only. A scripted run must never post a
+    // review to a real pull request.
+    commit,
+    mechanics: { advance, resolveReview, switchMode },
+});
 
 const ROUTES = {
     "/move": (body) => {
@@ -258,12 +327,11 @@ const ROUTES = {
         commit();
         return { message: result.reason };
     },
-    "/review": (body) => {
+    "/review": async (body) => {
         const card = findCard(body.cardId);
         if (!card) return { message: "Card not found" };
-        const result = resolveReview(card, body.verdict, body.note);
-        commit();
-        return { message: result.reason };
+        const result = await applyReview(card, body.verdict, body.note);
+        return { message: `${result.reason} — ${result.posted}`, url: result.url };
     },
     "/policy": (body) => {
         const config = loadConfig();
@@ -331,7 +399,7 @@ async function handle(req, res, instanceId) {
             const sync = await syncFromGitHub();
             result = { message: `${sync.repo || "repo"}: ${sync.notes.join("; ")}` };
         } else if (ROUTES[req.url]) {
-            result = ROUTES[req.url](body);
+            result = await ROUTES[req.url](body);
         }
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ...result, state: fullSnapshot() }));
@@ -566,22 +634,27 @@ const actions = [
     {
         name: "resolve_review",
         description:
-            "Record a decision at the review gate. Approving ships the card and marks it as read by a human; requesting changes sends it back to the harness with feedback.",
+            "Record a decision at the review gate. Approving ships the card and marks it as read by a human; requesting changes sends it back to the harness with feedback. By default this only writes to the board: set post to true to also submit the decision as a real pull request review on GitHub. The gate is human-owned, so do not post on someone's behalf unless they asked you to.",
         inputSchema: {
             type: "object",
             properties: {
                 cardId: { type: "number" },
                 verdict: { type: "string", enum: ["approved", "changes-requested"] },
                 note: { type: "string" },
+                post: {
+                    type: "boolean",
+                    description: "Submit this verdict to GitHub as a pull request review. Defaults to false.",
+                },
             },
             required: ["cardId", "verdict"],
         },
         handler: async (ctx) => {
             const card = findCard(ctx.input.cardId);
             if (!card) return { error: `No card ${ctx.input.cardId}` };
+            if (ctx.input.post) return applyReview(card, ctx.input.verdict, ctx.input.note);
             const result = resolveReview(card, ctx.input.verdict, ctx.input.note);
             commit();
-            return result;
+            return { ...result, posted: "board only — pass post: true to submit this to GitHub" };
         },
     },
     {

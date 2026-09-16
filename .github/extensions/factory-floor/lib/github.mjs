@@ -144,3 +144,27 @@ export async function currentRepo() {
         return "";
     }
 }
+
+/**
+ * Submit a real review on a pull request.
+ *
+ * This is the point of the gate: the decision has to land where the team
+ * works, not only on the board. GitHub requires a body for request-changes,
+ * and refuses to let you formally approve your own pull request — the caller
+ * is expected to fall back to a comment when this throws.
+ */
+export async function submitReview(repo, number, verdict, body) {
+    const args = ["pr", "review", String(number)];
+    if (repo) args.push("--repo", repo);
+    args.push(verdict === "approved" ? "--approve" : "--request-changes");
+    if (body) args.push("--body", body);
+    await runGh(args, 30_000);
+}
+
+/** Leave a comment on a pull request or an issue. The fallback when a formal review will not go through. */
+export async function comment(repo, kind, number, body) {
+    const args = [kind === "pr" ? "pr" : "issue", "comment", String(number)];
+    if (repo) args.push("--repo", repo);
+    args.push("--body", body);
+    await runGh(args, 30_000);
+}
