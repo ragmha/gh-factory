@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { products } from './products.js';
 import { getCart, addToCart, removeFromCart, cartTotal, MAX_QUANTITY } from './cart.js';
@@ -87,9 +88,21 @@ app.get('/api/chaos/error', (req, res) => {
   res.status(500).json({ error: 'Simulated failure for SRE Agent demo' });
 });
 
-// Only listen when started directly, so tests can import the app and bind a
-// port of their own.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// True only when this file is the process entry point, so tests can import the
+// app and bind a port of their own. Node resolves symlinks for
+// import.meta.url but not for argv[1], so resolve argv[1] the same way.
+// Without this, a symlinked checkout starts the server and never listens.
+function startedDirectly() {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(entry)).href;
+  } catch {
+    return import.meta.url === pathToFileURL(entry).href;
+  }
+}
+
+if (startedDirectly()) {
   app.listen(port, () => {
     console.log(`gh-factory-api listening on port ${port}`);
   });
