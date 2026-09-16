@@ -1,0 +1,10 @@
+{
+  "name": "factory-floor",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Canvas extension: the control surface for a software factory. Intake -> Queue -> Harness -> Checks -> Review Gate -> Shipped, with a dark/lit autonomy policy and a human-owned review gate.",
+  "main": "extension.mjs",
+  "keywords": ["copilot", "canvas", "software-factory", "review-gate", "autonomy"],
+  "license": "MIT"
+}
