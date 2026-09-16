@@ -1,4 +1,4 @@
-# gh-factory
+# Factory
 
 A small, real, end-to-end demo of an **AI-native software factory**: a change
 starts as a GitHub issue/PR, moves through spec → task → build → validate →
