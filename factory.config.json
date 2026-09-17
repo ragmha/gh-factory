@@ -1,0 +1,139 @@
+{
+  "repo": "ragmha/gh-factory",
+  "defaultAutonomy": "lit",
+  "rules": [
+    {
+      "id": "infra",
+      "paths": [
+        "infra/**"
+      ],
+      "autonomy": "lit",
+      "blastRadius": "high",
+      "reason": "Bicep provisions real cloud resources. A template that compiles can still delete a database or open a network."
+    },
+    {
+      "id": "pipelines",
+      "paths": [
+        ".github/workflows/**"
+      ],
+      "autonomy": "lit",
+      "blastRadius": "high",
+      "reason": "The pipeline is the thing that verifies everything else. A change here can quietly weaken every gate downstream."
+    },
+    {
+      "id": "cart-pricing",
+      "paths": [
+        "apps/api/src/cart.js",
+        "apps/api/src/products.js"
+      ],
+      "autonomy": "lit",
+      "blastRadius": "high",
+      "reason": "Totals and prices are paid for in real money, and an off-by-one in a reduce looks exactly like correct code."
+    },
+    {
+      "id": "public-api",
+      "paths": [
+        "apps/api/src/index.js",
+        "apps/web/src/api.ts",
+        "apps/web/src/types.ts"
+      ],
+      "autonomy": "lit",
+      "blastRadius": "high",
+      "reason": "Public contract between web and api. Changing it shapes every caller's work for a long time."
+    },
+    {
+      "id": "containers",
+      "paths": [
+        "**/Dockerfile",
+        "docker-compose.yml",
+        "apps/web/nginx.conf"
+      ],
+      "autonomy": "lit",
+      "blastRadius": "medium",
+      "reason": "Runtime and serving configuration. Failures show up in production, not in the test run."
+    },
+    {
+      "id": "tests",
+      "paths": [
+        "**/*.test.js",
+        "**/*.test.ts",
+        "**/*.test.tsx"
+      ],
+      "autonomy": "dark",
+      "blastRadius": "low",
+      "reason": "Green-or-red oracle, small blast radius, and a broken test fails loudly and immediately."
+    },
+    {
+      "id": "styling",
+      "paths": [
+        "**/*.css",
+        "apps/web/public/**",
+        "apps/web/src/assets/**"
+      ],
+      "autonomy": "dark",
+      "blastRadius": "low",
+      "reason": "Presentation only. The build is the oracle and the worst case is visible at a glance."
+    },
+    {
+      "id": "docs",
+      "paths": [
+        "docs/**",
+        "**/*.md"
+      ],
+      "autonomy": "dark",
+      "blastRadius": "low",
+      "reason": "No runtime effect. The worst case is prose that needs another pass."
+    },
+    {
+      "id": "lint-and-tsconfig",
+      "paths": [
+        "apps/web/.oxlintrc.json",
+        "**/tsconfig*.json"
+      ],
+      "autonomy": "dark",
+      "blastRadius": "low",
+      "reason": "Machine-provable done. The linter and the typechecker are the oracle."
+    },
+    {
+      "id": "product-code",
+      "paths": [
+        "apps/**/src/**"
+      ],
+      "autonomy": "lit",
+      "blastRadius": "medium",
+      "reason": "Default to lit. A loop has to earn the dark; it does not start there."
+    }
+  ],
+  "gates": {
+    "required": [
+      "test-api",
+      "build-web",
+      "validate-bicep"
+    ],
+    "workflow": ".github/workflows/ci.yml",
+    "note": "These names must match the job names in ci.yml. The canvas reads check runs by name."
+  },
+  "loop": {
+    "targetSteps": 10,
+    "warnAfterSteps": 20,
+    "note": "An agent holds up for three to ten steps and starts losing the thread past twenty. Short loops are cheap to verify; sprawling loops hide mistakes in the corners."
+  },
+  "intake": {
+    "labels": [
+      "human-intent",
+      "ready-work",
+      "agent-execution",
+      "feedback-learning"
+    ],
+    "signalLabels": [
+      "feedback-learning"
+    ],
+    "note": "Which open issues belong in the factory queue. Labels are OR-ed. A signal came back from production (feedback-learning); an intent is a decision somebody made. durable-context is deliberately not a signal marker — it describes what an issue carries, not where it came from."
+  },
+  "reviewGate": {
+    "owner": "human",
+    "note": "Every box in this factory is close to free except this one. It is the only box that does not scale, which is exactly why a person owns it."
+  },
+  "mode": "lit",
+  "note": "Back pressure, expressed as data. A loop only earns the dark when the check is cheap, runs often, and is hard to fake. Everything else keeps the lights on. The Factory Floor canvas reads and writes this file, so flipping a switch in the UI edits real policy."
+}
