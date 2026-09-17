@@ -39,9 +39,15 @@ export function addToCart(cartId, productId, quantity) {
   const cart = getCart(cartId);
   const existing = cart.find((item) => item.productId === productId);
 
+  // Don't trust the stored quantity. getCart hands out the internal array by
+  // reference, so a line could hold anything; a legacy string would make the
+  // sum below concatenate, which is the bug this module exists to prevent.
+  // Treat an unusable quantity as absent so a valid add restores the invariant.
+  const current = Number.isInteger(existing?.quantity) ? existing.quantity : 0;
+
   // Each add is valid on its own, so check the running total too. Otherwise
   // repeated adds walk past the cap the validation above exists to enforce.
-  const nextQuantity = (existing?.quantity ?? 0) + parsed.quantity;
+  const nextQuantity = current + parsed.quantity;
   if (nextQuantity > MAX_QUANTITY) return { ok: false, reason: 'quantity_limit_exceeded' };
 
   if (existing) {

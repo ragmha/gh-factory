@@ -106,3 +106,20 @@ test('a large valid add still cannot overflow the stored quantity', () => {
   assert.equal(result.reason, 'invalid_quantity');
   assert.equal(getCart(cartId).length, 0);
 });
+
+test('a valid add repairs a line left corrupted by a caller', () => {
+  const cartId = 'test-cart-12';
+  addToCart(cartId, 'p1', 2);
+
+  // getCart hands out the internal array, so a caller can write anything.
+  // This is the pre-fix shape: a string quantity that += would concatenate.
+  getCart(cartId)[0].quantity = '33';
+
+  const result = addToCart(cartId, 'p1', 2);
+  assert.equal(result.ok, true);
+  const cart = getCart(cartId);
+  assert.equal(cart.length, 1);
+  assert.equal(cart[0].quantity, 2, 'expected the corrupted quantity to be replaced, not concatenated');
+  assert.equal(typeof cart[0].quantity, 'number');
+  assert.equal(cartTotal(cartId), 109.98);
+});

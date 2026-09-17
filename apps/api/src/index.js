@@ -91,7 +91,8 @@ app.get('/api/chaos/error', (req, res) => {
 // True only when this file is the process entry point, so tests can import the
 // app and bind a port of their own. Node resolves symlinks for
 // import.meta.url but not for argv[1], so resolve argv[1] the same way.
-// Without this, a symlinked checkout starts the server and never listens.
+// Without this, running from a symlinked path makes the check false and the
+// process exits without ever listening: no error, no port, exit code 0.
 function startedDirectly() {
   const entry = process.argv[1];
   if (!entry) return false;
