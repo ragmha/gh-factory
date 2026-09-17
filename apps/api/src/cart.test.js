@@ -108,18 +108,30 @@ test('a large valid add still cannot overflow the stored quantity', () => {
 });
 
 test('a valid add repairs a line left corrupted by a caller', () => {
-  const cartId = 'test-cart-12';
-  addToCart(cartId, 'p1', 2);
-
   // getCart hands out the internal array, so a caller can write anything.
-  // This is the pre-fix shape: a string quantity that += would concatenate.
-  getCart(cartId)[0].quantity = '33';
+  // Each of these is unusable under the contract and must be replaced, not
+  // built on: a string concatenates, and an out-of-range number would wedge
+  // the line at the cap forever.
+  for (const corrupt of ['33', 0, -5, MAX_QUANTITY + 1, 1.5, NaN, null, undefined]) {
+    const cartId = `test-cart-12-${String(corrupt)}`;
+    addToCart(cartId, 'p1', 2);
+    getCart(cartId)[0].quantity = corrupt;
 
-  const result = addToCart(cartId, 'p1', 2);
+    const result = addToCart(cartId, 'p1', 2);
+    assert.equal(result.ok, true, `expected a valid add to succeed over ${String(corrupt)}`);
+
+    const cart = getCart(cartId);
+    assert.equal(cart.length, 1);
+    assert.equal(cart[0].quantity, 2, `expected ${String(corrupt)} to be replaced, not combined`);
+    assert.equal(typeof cart[0].quantity, 'number');
+    assert.equal(cartTotal(cartId), 109.98);
+  }
+});
+
+test('a valid stored quantity is still accumulated, not discarded', () => {
+  const cartId = 'test-cart-13';
+  addToCart(cartId, 'p1', 2);
+  const result = addToCart(cartId, 'p1', 3);
   assert.equal(result.ok, true);
-  const cart = getCart(cartId);
-  assert.equal(cart.length, 1);
-  assert.equal(cart[0].quantity, 2, 'expected the corrupted quantity to be replaced, not concatenated');
-  assert.equal(typeof cart[0].quantity, 'number');
-  assert.equal(cartTotal(cartId), 109.98);
+  assert.equal(getCart(cartId)[0].quantity, 5);
 });

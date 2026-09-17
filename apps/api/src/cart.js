@@ -6,6 +6,11 @@ const carts = new Map();
 /** Most of a single product one cart line may hold. */
 export const MAX_QUANTITY = 99;
 
+/** The one definition of a usable quantity: a whole number in [1, MAX_QUANTITY]. */
+function isValidQuantity(value) {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= MAX_QUANTITY;
+}
+
 /**
  * Validate a requested quantity. Returns a structured result so callers can
  * classify the failure themselves instead of guessing from a null.
@@ -17,10 +22,7 @@ export const MAX_QUANTITY = 99;
  */
 function parseQuantity(value) {
   if (value === undefined) return { ok: true, quantity: 1 };
-  if (typeof value !== 'number' || !Number.isInteger(value)) {
-    return { ok: false, reason: 'invalid_quantity' };
-  }
-  if (value < 1 || value > MAX_QUANTITY) return { ok: false, reason: 'invalid_quantity' };
+  if (!isValidQuantity(value)) return { ok: false, reason: 'invalid_quantity' };
   return { ok: true, quantity: value };
 }
 
@@ -40,10 +42,11 @@ export function addToCart(cartId, productId, quantity) {
   const existing = cart.find((item) => item.productId === productId);
 
   // Don't trust the stored quantity. getCart hands out the internal array by
-  // reference, so a line could hold anything; a legacy string would make the
-  // sum below concatenate, which is the bug this module exists to prevent.
-  // Treat an unusable quantity as absent so a valid add restores the invariant.
-  const current = Number.isInteger(existing?.quantity) ? existing.quantity : 0;
+  // reference, so a line could hold anything: a legacy string that would make
+  // the sum concatenate, or an out-of-range number that would wedge the line
+  // at the cap. Anything the contract wouldn't accept as input is treated as
+  // absent, so the next valid add repairs the line instead of building on it.
+  const current = isValidQuantity(existing?.quantity) ? existing.quantity : 0;
 
   // Each add is valid on its own, so check the running total too. Otherwise
   // repeated adds walk past the cap the validation above exists to enforce.
