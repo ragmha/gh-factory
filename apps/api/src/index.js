@@ -1,7 +1,9 @@
 import express from 'express';
 import cors from 'cors';
+import { realpathSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { products } from './products.js';
-import { getCart, addToCart, removeFromCart, cartTotal } from './cart.js';
+import { getCart, addToCart, removeFromCart, cartTotal, MAX_QUANTITY } from './cart.js';
 
 const app = express();
 const port = process.env.PORT || 8080;
@@ -44,12 +46,34 @@ app.get('/api/cart/:cartId', (req, res) => {
   res.json({ items: getCart(req.params.cartId), total: cartTotal(req.params.cartId) });
 });
 
+// Maps a cart service failure to its HTTP response. Every reason the service
+// can return needs an entry here; an unmapped one is a bug, not a 400.
+const CART_FAILURES = {
+  product_not_found: { status: 404, error: 'Product not found' },
+  invalid_quantity: {
+    status: 400,
+    error: `quantity must be a whole number between 1 and ${MAX_QUANTITY}`,
+  },
+  quantity_limit_exceeded: {
+    status: 409,
+    error: `a cart line cannot hold more than ${MAX_QUANTITY} of the same item`,
+  },
+};
+
 app.post('/api/cart/:cartId/items', (req, res) => {
   const { productId, quantity } = req.body || {};
   if (!productId) return res.status(400).json({ error: 'productId is required' });
-  const cart = addToCart(req.params.cartId, productId, quantity ?? 1);
-  if (!cart) return res.status(404).json({ error: 'Product not found' });
-  res.json({ items: cart, total: cartTotal(req.params.cartId) });
+
+  const result = addToCart(req.params.cartId, productId, quantity);
+  if (!result.ok) {
+    const failure = CART_FAILURES[result.reason];
+    if (!failure) {
+      console.error(JSON.stringify({ event: 'unmapped_cart_failure', reason: result.reason }));
+      return res.status(500).json({ error: 'Could not add item to cart' });
+    }
+    return res.status(failure.status).json({ error: failure.error });
+  }
+  res.json({ items: result.items, total: cartTotal(req.params.cartId) });
 });
 
 app.delete('/api/cart/:cartId/items/:productId', (req, res) => {
@@ -64,6 +88,25 @@ app.get('/api/chaos/error', (req, res) => {
   res.status(500).json({ error: 'Simulated failure for SRE Agent demo' });
 });
 
-app.listen(port, () => {
-  console.log(`gh-factory-api listening on port ${port}`);
-});
+// True only when this file is the process entry point, so tests can import the
+// app and bind a port of their own. Node resolves symlinks for
+// import.meta.url but not for argv[1], so resolve argv[1] the same way.
+// Without this, running from a symlinked path makes the check false and the
+// process exits without ever listening: no error, no port, exit code 0.
+function startedDirectly() {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(entry)).href;
+  } catch {
+    return import.meta.url === pathToFileURL(entry).href;
+  }
+}
+
+if (startedDirectly()) {
+  app.listen(port, () => {
+    console.log(`gh-factory-api listening on port ${port}`);
+  });
+}
+
+export { app };
