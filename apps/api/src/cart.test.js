@@ -53,16 +53,23 @@ test('rejects zero, negative, and fractional quantities', () => {
   assert.equal(getCart('test-cart-6').length, 0);
 });
 
-test('defaults a missing quantity to 1', () => {
+test('defaults an omitted quantity to 1', () => {
   for (const [label, call] of [
     ['omitted', () => addToCart(`test-cart-7-omitted`, 'p2')],
     ['undefined', () => addToCart(`test-cart-7-undefined`, 'p2', undefined)],
-    ['null', () => addToCart(`test-cart-7-null`, 'p2', null)],
   ]) {
     const result = call();
     assert.equal(result.ok, true, `expected ${label} quantity to be accepted`);
     assert.equal(result.items[0].quantity, 1, `expected ${label} quantity to default to 1`);
   }
+});
+
+test('rejects an explicit null quantity rather than defaulting it', () => {
+  const cartId = 'test-cart-7-null';
+  const result = addToCart(cartId, 'p2', null);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'invalid_quantity');
+  assert.equal(getCart(cartId).length, 0);
 });
 
 test('adding the same product twice sums the quantities', () => {

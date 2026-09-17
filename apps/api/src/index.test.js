@@ -30,16 +30,16 @@ test('accepts a valid quantity', async () => {
   assert.equal(cart.total, 109.98);
 });
 
-test('a missing quantity still defaults to 1', async () => {
+test('an omitted quantity still defaults to 1', async () => {
   const res = await addItem('http-cart-2', { productId: 'p2' });
   assert.equal(res.status, 200);
   assert.equal((await res.json()).items[0].quantity, 1);
 });
 
-test('a null quantity still defaults to 1', async () => {
+test('an explicit null quantity is rejected with 400', async () => {
   const res = await addItem('http-cart-3', { productId: 'p2', quantity: null });
-  assert.equal(res.status, 200);
-  assert.equal((await res.json()).items[0].quantity, 1);
+  assert.equal(res.status, 400);
+  assert.match((await res.json()).error, /quantity must be a whole number/);
 });
 
 test('rejects an invalid quantity with 400', async () => {

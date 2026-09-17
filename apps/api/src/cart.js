@@ -11,10 +11,12 @@ export const MAX_QUANTITY = 99;
  * classify the failure themselves instead of guessing from a null.
  *
  * Owns the default, so callers pass the raw value through rather than
- * defaulting it themselves and leaving this branch unreachable.
+ * defaulting it themselves and leaving this branch unreachable. Only an
+ * omitted quantity defaults; an explicit null is a value the caller chose and
+ * gets validated like any other, the same way "3" does.
  */
 function parseQuantity(value) {
-  if (value === undefined || value === null) return { ok: true, quantity: 1 };
+  if (value === undefined) return { ok: true, quantity: 1 };
   if (typeof value !== 'number' || !Number.isInteger(value)) {
     return { ok: false, reason: 'invalid_quantity' };
   }
